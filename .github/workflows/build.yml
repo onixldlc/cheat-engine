@@ -1,0 +1,405 @@
+name: Build Cheat Engine
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+env:
+  LAZARUS_VERSION: "3.6"
+  FPC_VERSION: "3.2.4"
+
+jobs:
+  # =========================================================================
+  # Job 1: Build all Lazarus / FreePascal components on Windows
+  # =========================================================================
+  build-lazarus:
+    name: Build Lazarus Components (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # Install Lazarus 32-bit base + cross-compiler targeting x86_64-win64
+      # ------------------------------------------------------------------
+      - name: Download Lazarus win32 installer
+        shell: pwsh
+        run: |
+          $base = "https://sourceforge.net/projects/lazarus/files"
+          $dir  = "Lazarus Windows 32 bits/Lazarus $env:LAZARUS_VERSION"
+          $file = "lazarus-$env:LAZARUS_VERSION-fpc-$env:FPC_VERSION-win32.exe"
+          $url  = "$base/$dir/$file/download"
+          Write-Host "Downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile lazarus-win32.exe -MaximumRedirection 10 -TimeoutSec 300
+
+      - name: Install Lazarus win32
+        shell: pwsh
+        run: Start-Process -FilePath "lazarus-win32.exe" -ArgumentList "/verysilent /norestart" -Wait
+
+      - name: Download Lazarus cross-x86_64-win64 installer
+        shell: pwsh
+        run: |
+          $base = "https://sourceforge.net/projects/lazarus/files"
+          $dir  = "Lazarus Windows 32 bits/Lazarus $env:LAZARUS_VERSION"
+          $file = "lazarus-$env:LAZARUS_VERSION-fpc-$env:FPC_VERSION-cross-x86_64-win64-win32.exe"
+          $url  = "$base/$dir/$file/download"
+          Write-Host "Downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile lazarus-cross64.exe -MaximumRedirection 10 -TimeoutSec 300
+
+      - name: Install Lazarus cross-x86_64-win64
+        shell: pwsh
+        run: Start-Process -FilePath "lazarus-cross64.exe" -ArgumentList "/verysilent /norestart" -Wait
+
+      - name: Verify lazbuild
+        shell: pwsh
+        run: |
+          $laz = "C:\lazarus\lazbuild.exe"
+          if (-not (Test-Path $laz)) {
+            Write-Error "lazbuild.exe not found at $laz"
+            exit 1
+          }
+          & $laz --version
+
+      # ------------------------------------------------------------------
+      # Build main Cheat Engine (32-bit and 64-bit)
+      # ------------------------------------------------------------------
+      - name: Build Cheat Engine 32-bit
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\cheatengine.lpi" --build-mode="Release 32-Bit" --build-all
+
+      - name: Build Cheat Engine 64-bit
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\cheatengine.lpi" --build-mode="Release 64-Bit" --build-all
+
+      # ------------------------------------------------------------------
+      # Build Launcher (32-bit only — targets Cheat Engine\bin\Cheat Engine.exe)
+      # ------------------------------------------------------------------
+      - name: Build Launcher
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\launcher\cheatengine.lpi" --build-mode=release --build-all
+
+      # ------------------------------------------------------------------
+      # Build winhook DLL (32-bit and 64-bit)
+      # ------------------------------------------------------------------
+      - name: Build winhook 32-bit
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\winhook\winhook.lpi" --build-mode="Release 32" --build-all
+
+      - name: Build winhook 64-bit
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\winhook\winhook.lpi" --build-mode="Release 64" --build-all
+
+      # ------------------------------------------------------------------
+      # Build speedhack DLL (32-bit and 64-bit)
+      # ------------------------------------------------------------------
+      - name: Build speedhack 32-bit
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\speedhack\speedhack.lpi" --build-mode="32-bit" --build-all
+
+      - name: Build speedhack 64-bit
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\speedhack\speedhack.lpi" --build-mode="64-bit" --build-all
+
+      # ------------------------------------------------------------------
+      # Build allochook DLL (32-bit and 64-bit)
+      # ------------------------------------------------------------------
+      - name: Build allochook 32-bit
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\allochook\allochook.lpi" --build-mode="32" --build-all
+
+      - name: Build allochook 64-bit
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\allochook\allochook.lpi" --build-mode="64" --build-all
+
+      # ------------------------------------------------------------------
+      # Build VEHDebug (32-bit and 64-bit)
+      # ------------------------------------------------------------------
+      - name: Build VEHDebug 32-bit
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\VEHDebug\vehdebug.lpi" --build-mode="release 32" --build-all
+
+      - name: Build VEHDebug 64-bit
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\VEHDebug\vehdebug.lpi" --build-mode="release 64" --build-all
+
+      # ------------------------------------------------------------------
+      # Build Tutorial (32-bit and 64-bit)
+      # ------------------------------------------------------------------
+      - name: Build Tutorial 32-bit
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\Tutorial\tutorial.lpi" --build-mode="release 32-Bit" --build-all
+
+      - name: Build Tutorial 64-bit
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\Tutorial\tutorial.lpi" --build-mode="release 64-Bit" --build-all
+
+      # ------------------------------------------------------------------
+      # Build xmplayer (Default build mode)
+      # ------------------------------------------------------------------
+      - name: Build xmplayer
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\xmplayer\xmplayer.lpi" --build-all
+
+      # ------------------------------------------------------------------
+      # Build cecore library
+      # ------------------------------------------------------------------
+      - name: Build cecore
+        run: C:\lazarus\lazbuild.exe "Cheat Engine\cecore.lpi" --build-all
+
+      # ------------------------------------------------------------------
+      # Upload Lazarus build output
+      # ------------------------------------------------------------------
+      - name: List build output
+        shell: cmd
+        run: |
+          if exist "Cheat Engine\bin" (
+            tree /F "Cheat Engine\bin"
+          ) else (
+            echo "No bin directory found"
+          )
+
+      - name: Upload Lazarus artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cheat-engine-lazarus-win
+          path: "Cheat Engine/bin/"
+          if-no-files-found: warn
+
+  # =========================================================================
+  # Job 2: Build MSVC C++ / C# components (DirectX hooks, data collectors)
+  # =========================================================================
+  build-msvc:
+    name: Build MSVC Components (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # ------------------------------------------------------------------
+      # DirectX hooks (32-bit and 64-bit release DLLs)
+      # ------------------------------------------------------------------
+      - name: Build DirectX hooks Win32
+        shell: pwsh
+        run: |
+          msbuild "Cheat Engine\Direct x mess\Direct x mess.sln" `
+            /p:Configuration=Release /p:Platform=Win32 /m /nologo
+
+      - name: Build DirectX hooks x64
+        shell: pwsh
+        run: |
+          msbuild "Cheat Engine\Direct x mess\Direct x mess.sln" `
+            /p:Configuration=Release /p:Platform=x64 /m /nologo
+
+      # ------------------------------------------------------------------
+      # MonoDataCollector (outputs to Cheat Engine/bin/autorun/dlls/)
+      # ------------------------------------------------------------------
+      - name: Build MonoDataCollector Win32
+        shell: pwsh
+        run: |
+          msbuild "Cheat Engine\MonoDataCollector\MonoDataCollector.sln" `
+            /p:Configuration=Release /p:Platform=Win32 /m /nologo
+
+      - name: Build MonoDataCollector x64
+        shell: pwsh
+        run: |
+          msbuild "Cheat Engine\MonoDataCollector\MonoDataCollector.sln" `
+            /p:Configuration=Release /p:Platform=x64 /m /nologo
+
+      # ------------------------------------------------------------------
+      # DotNetDataCollector (outputs to Cheat Engine/bin/autorun/dlls/)
+      # ------------------------------------------------------------------
+      - name: Build DotNetDataCollector Win32
+        shell: pwsh
+        run: |
+          msbuild "Cheat Engine\DotNetDataCollector\DotNetDataCollector.sln" `
+            /p:Configuration=Release /p:Platform=Win32 /m /nologo
+
+      - name: Build DotNetDataCollector x64
+        shell: pwsh
+        run: |
+          msbuild "Cheat Engine\DotNetDataCollector\DotNetDataCollector.sln" `
+            /p:Configuration=Release /p:Platform=x64 /m /nologo
+
+      # ------------------------------------------------------------------
+      # DotNetInvasiveDataCollector (C# — Any CPU)
+      # ------------------------------------------------------------------
+      - name: Build DotNetInvasiveDataCollector
+        shell: pwsh
+        run: |
+          msbuild "Cheat Engine\DotNetInvasiveDataCollector\DotNetInvasiveDataCollector.sln" `
+            /p:Configuration=Release /p:Platform="Any CPU" /m /nologo
+        continue-on-error: true
+
+      # ------------------------------------------------------------------
+      # CSCompiler (C# — Any CPU)
+      # ------------------------------------------------------------------
+      - name: Build CSCompiler
+        shell: pwsh
+        run: |
+          msbuild "Cheat Engine\DotNetCompiler\CSCompiler\CSCompiler.sln" `
+            /p:Configuration=Release /p:Platform="Any CPU" /m /nologo
+        continue-on-error: true
+
+      # ------------------------------------------------------------------
+      # Collect and upload MSVC artifacts
+      # ------------------------------------------------------------------
+      - name: Upload MSVC artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cheat-engine-msvc-win
+          path: |
+            Cheat Engine/bin/autorun/dlls/
+            Cheat Engine/Direct x mess/Release/
+            Cheat Engine/Direct x mess/x64/
+          if-no-files-found: warn
+
+  # =========================================================================
+  # Job 3: Build kernel driver using WDK
+  # =========================================================================
+  build-driver:
+    name: Build Kernel Driver (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Install WDK — required for WindowsKernelModeDriver10.0 toolset
+      - name: Install Windows Driver Kit (WDK)
+        shell: pwsh
+        run: |
+          Write-Host "Installing WDK via Chocolatey..."
+          choco install windows-driver-kit-11 -y --no-progress
+          # Refresh environment so msbuild can find WDK props
+          $env:WDKContentRoot = "C:\Program Files (x86)\Windows Kits\10\"
+          [System.Environment]::SetEnvironmentVariable("WDKContentRoot", $env:WDKContentRoot, "Machine")
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # Build both 32-bit and 64-bit kernel drivers
+      - name: Build DBKKernel x64
+        shell: pwsh
+        run: |
+          msbuild DBKKernel\DBKKernel.sln `
+            /p:Configuration=Release /p:Platform=x64 /m /nologo
+
+      - name: Build DBKKernel Win32
+        shell: pwsh
+        run: |
+          msbuild DBKKernel\DBKKernel.sln `
+            /p:Configuration=Release /p:Platform=Win32 /m /nologo
+
+      # Collect .sys + .inf output files
+      - name: Locate driver output files
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path DBKKernel -Recurse -Include "*.sys","*.inf","*.cat" |
+            Select-Object FullName | Format-Table -AutoSize
+
+      - name: Upload kernel driver artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cheat-engine-driver
+          path: |
+            DBKKernel/**/Release/*.sys
+            DBKKernel/**/Release/*.inf
+            DBKKernel/**/Release/*.cat
+            DBKKernel/**/x64/Release/*.sys
+            DBKKernel/**/x64/Release/*.inf
+            DBKKernel/**/x64/Release/*.cat
+          if-no-files-found: warn
+
+  # =========================================================================
+  # Job 4: Build ceserver on Linux (64-bit and 32-bit)
+  # =========================================================================
+  build-ceserver:
+    name: Build ceserver (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc gcc-multilib zlib1g-dev zlib1g-dev:i386
+
+      - name: Build ceserver 64-bit
+        run: |
+          cd "Cheat Engine/ceserver/gcc"
+          make
+
+      - name: Rename 64-bit binary
+        run: mv "Cheat Engine/ceserver/gcc/ceserver" "Cheat Engine/ceserver/gcc/ceserver64"
+
+      - name: Build ceserver 32-bit
+        run: |
+          cd "Cheat Engine/ceserver/gcc"
+          make -f makefile32
+
+      - name: Rename 32-bit binary
+        run: mv "Cheat Engine/ceserver/gcc/ceserver" "Cheat Engine/ceserver/gcc/ceserver32"
+
+      - name: Upload ceserver artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ceserver-linux
+          path: |
+            Cheat Engine/ceserver/gcc/ceserver32
+            Cheat Engine/ceserver/gcc/ceserver64
+          if-no-files-found: error
+
+  # =========================================================================
+  # Job 5: Assemble final release package (runs only on pushes to master)
+  # =========================================================================
+  package:
+    name: Package Release
+    runs-on: windows-latest
+    needs:
+      - build-lazarus
+      - build-msvc
+      - build-driver
+      - build-ceserver
+    if: >-
+      always() &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+
+    steps:
+      - name: Download Lazarus artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: cheat-engine-lazarus-win
+          path: release/bin
+        continue-on-error: true
+
+      - name: Download MSVC artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: cheat-engine-msvc-win
+          path: release/msvc
+        continue-on-error: true
+
+      - name: Download kernel driver artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: cheat-engine-driver
+          path: release/driver
+        continue-on-error: true
+
+      - name: Download ceserver artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ceserver-linux
+          path: release/ceserver
+        continue-on-error: true
+
+      - name: List release contents
+        shell: cmd
+        run: tree /F release
+
+      - name: Create release archive
+        shell: cmd
+        run: 7z a CheatEngine-%GITHUB_SHA%.zip .\release\*
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: CheatEngine-Release
+          path: CheatEngine-${{ github.sha }}.zip
+          if-no-files-found: warn
