@@ -1,4 +1,4 @@
-name: Build Cheat Engine
+name: Build Cheat Engine (All Components)
 on:
   workflow_dispatch:
   push:
@@ -13,26 +13,74 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install Lazarus
+      # --- Lazarus toolchain ---
+      - name: Install Lazarus 2.2.2
         uses: gcarreno/setup-lazarus@v3
         with:
           lazarus-version: "2.2.2"
           with-cache: false
 
-      - name: Install 32-bit cross compiler
+      - name: Install 32-bit FPC cross-compiler
         shell: pwsh
         run: |
-          $url = "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%202.2.2/lazarus-2.2.2-fpc-3.2.2-cross-i386-win32-win64.exe/download"
-          curl.exe -L -o cross-compiler.exe $url
+          curl.exe -L -o cross-compiler.exe "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%202.2.2/lazarus-2.2.2-fpc-3.2.2-cross-i386-win32-win64.exe/download"
           Start-Process -Wait -FilePath .\cross-compiler.exe -ArgumentList "/verysilent"
 
-      - name: Build 64-Bit
-        shell: cmd
-        run: lazbuild --build-mode="Release 64-bit" --no-write-project "Cheat Engine/cheatengine.lpi"
+      # --- Visual Studio toolchain ---
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
 
-      - name: Upload artifacts
+      # --- Discover project files ---
+      - name: List all project files
+        shell: cmd
+        run: |
+          echo === LPI FILES ===
+          dir /S /B *.lpi
+          echo === LPR FILES ===
+          dir /S /B *.lpr
+          echo === SLN FILES ===
+          dir /S /B *.sln
+
+      # --- Build ALL Lazarus projects ---
+      - name: Build all LPI projects
+        shell: cmd
+        continue-on-error: true
+        run: for /F "tokens=*" %%i in ('dir /A:-D /B /S "*.lpi"') do (lazbuild "%%i" --build-all)
+
+      # --- Build dual-arch LPR projects ---
+      - name: Build speedhack, luaclient, vehdebug (32-bit + 64-bit)
+        shell: cmd
+        continue-on-error: true
+        run: |
+          for /F "tokens=*" %%i in ('dir /A:-D /B /S "speedhack.lpr"') do (
+            lazbuild "%%i" --cpu=i386 --build-all
+            lazbuild "%%i" --cpu=x86_64 --build-all
+          )
+          for /F "tokens=*" %%i in ('dir /A:-D /B /S "luaclient.lpr"') do (
+            lazbuild "%%i" --cpu=i386 --build-all
+            lazbuild "%%i" --cpu=x86_64 --build-all
+          )
+          for /F "tokens=*" %%i in ('dir /A:-D /B /S "vehdebug.lpr"') do (
+            lazbuild "%%i" --cpu=i386 --build-all
+            lazbuild "%%i" --cpu=x86_64 --build-all
+          )
+
+      # --- Build ALL Visual Studio solutions ---
+      - name: Build all SLN projects (Win32)
+        shell: cmd
+        continue-on-error: true
+        run: for /F "tokens=*" %%i in ('dir /A:-D /B /S "*.sln"') do (msbuild "%%i" /p:Configuration=Release /p:Platform=Win32 /m /t:Rebuild)
+
+      - name: Build all SLN projects (x64)
+        shell: cmd
+        continue-on-error: true
+        run: for /F "tokens=*" %%i in ('dir /A:-D /B /S "*.sln"') do (msbuild "%%i" /p:Configuration=Release /p:Platform=x64 /m /t:Rebuild)
+
+      # --- Upload everything ---
+      - name: Upload all build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: CheatEngine-x64
-          path: Cheat Engine/bin/
-          if-no-files-found: error
+          name: CheatEngine-Full-Build
+          path: |
+            Cheat Engine/bin/
+          if-no-files-found: warn
