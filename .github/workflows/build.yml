@@ -24,129 +24,118 @@ jobs:
         uses: actions/checkout@v4
 
       # ------------------------------------------------------------------
-      # Install Lazarus 32-bit base + cross-compiler targeting x86_64-win64
+      # Install Lazarus (win64 base) via the official setup-lazarus action,
+      # then add the i386-win32 cross-compiler with curl.exe so that both
+      # 32-bit and 64-bit targets can be built on this 64-bit runner.
       # ------------------------------------------------------------------
-      - name: Download Lazarus win32 installer
+      - name: Setup Lazarus ${{ env.LAZARUS_VERSION }}
+        uses: gcarreno/setup-lazarus@v3.2.4
+        with:
+          lazarus-version: ${{ env.LAZARUS_VERSION }}
+          with-cache: true
+
+      - name: Download i386-win32 cross-compiler
         shell: pwsh
         run: |
-          $base = "https://sourceforge.net/projects/lazarus/files"
-          $dir  = "Lazarus Windows 32 bits/Lazarus $env:LAZARUS_VERSION"
-          $file = "lazarus-$env:LAZARUS_VERSION-fpc-$env:FPC_VERSION-win32.exe"
-          $url  = "$base/$dir/$file/download"
-          Write-Host "Downloading $url"
-          Invoke-WebRequest -Uri $url -OutFile lazarus-win32.exe -MaximumRedirection 10 -TimeoutSec 300
+          $ver = $env:LAZARUS_VERSION
+          $fpc = $env:FPC_VERSION
+          $url = "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%20$ver/lazarus-$ver-fpc-$fpc-cross-i386-win32-win64.exe/download"
+          Write-Host "Downloading cross-compiler: $url"
+          curl.exe -L -A "Mozilla/5.0" --retry 3 --retry-delay 5 -o lazarus-cross-i386.exe $url
+          if ($LASTEXITCODE -ne 0) { Write-Error "Cross-compiler download failed"; exit 1 }
 
-      - name: Install Lazarus win32
+      - name: Install i386-win32 cross-compiler
         shell: pwsh
-        run: Start-Process -FilePath "lazarus-win32.exe" -ArgumentList "/verysilent /norestart" -Wait
-
-      - name: Download Lazarus cross-x86_64-win64 installer
-        shell: pwsh
-        run: |
-          $base = "https://sourceforge.net/projects/lazarus/files"
-          $dir  = "Lazarus Windows 32 bits/Lazarus $env:LAZARUS_VERSION"
-          $file = "lazarus-$env:LAZARUS_VERSION-fpc-$env:FPC_VERSION-cross-x86_64-win64-win32.exe"
-          $url  = "$base/$dir/$file/download"
-          Write-Host "Downloading $url"
-          Invoke-WebRequest -Uri $url -OutFile lazarus-cross64.exe -MaximumRedirection 10 -TimeoutSec 300
-
-      - name: Install Lazarus cross-x86_64-win64
-        shell: pwsh
-        run: Start-Process -FilePath "lazarus-cross64.exe" -ArgumentList "/verysilent /norestart" -Wait
+        run: Start-Process -FilePath ".\lazarus-cross-i386.exe" -ArgumentList "/verysilent /norestart" -Wait
 
       - name: Verify lazbuild
         shell: pwsh
         run: |
-          $laz = "C:\lazarus\lazbuild.exe"
-          if (-not (Test-Path $laz)) {
-            Write-Error "lazbuild.exe not found at $laz"
-            exit 1
-          }
+          $laz = (Get-Command lazbuild -ErrorAction SilentlyContinue)?.Source
+          if (-not $laz) { $laz = "C:\lazarus\lazbuild.exe" }
+          Write-Host "lazbuild: $laz"
           & $laz --version
 
       # ------------------------------------------------------------------
       # Build main Cheat Engine (32-bit and 64-bit)
       # ------------------------------------------------------------------
       - name: Build Cheat Engine 32-bit
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\cheatengine.lpi" --build-mode="Release 32-Bit" --build-all
+        run: lazbuild "Cheat Engine\cheatengine.lpi" --build-mode="Release 32-Bit" --build-all
 
       - name: Build Cheat Engine 64-bit
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\cheatengine.lpi" --build-mode="Release 64-Bit" --build-all
+        run: lazbuild "Cheat Engine\cheatengine.lpi" --build-mode="Release 64-Bit" --build-all
 
       # ------------------------------------------------------------------
-      # Build Launcher (32-bit only — targets Cheat Engine\bin\Cheat Engine.exe)
+      # Build Launcher
       # ------------------------------------------------------------------
       - name: Build Launcher
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\launcher\cheatengine.lpi" --build-mode=release --build-all
+        run: lazbuild "Cheat Engine\launcher\cheatengine.lpi" --build-mode=release --build-all
 
       # ------------------------------------------------------------------
       # Build winhook DLL (32-bit and 64-bit)
       # ------------------------------------------------------------------
       - name: Build winhook 32-bit
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\winhook\winhook.lpi" --build-mode="Release 32" --build-all
+        run: lazbuild "Cheat Engine\winhook\winhook.lpi" --build-mode="Release 32" --build-all
 
       - name: Build winhook 64-bit
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\winhook\winhook.lpi" --build-mode="Release 64" --build-all
+        run: lazbuild "Cheat Engine\winhook\winhook.lpi" --build-mode="Release 64" --build-all
 
       # ------------------------------------------------------------------
       # Build speedhack DLL (32-bit and 64-bit)
       # ------------------------------------------------------------------
       - name: Build speedhack 32-bit
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\speedhack\speedhack.lpi" --build-mode="32-bit" --build-all
+        run: lazbuild "Cheat Engine\speedhack\speedhack.lpi" --build-mode="32-bit" --build-all
 
       - name: Build speedhack 64-bit
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\speedhack\speedhack.lpi" --build-mode="64-bit" --build-all
+        run: lazbuild "Cheat Engine\speedhack\speedhack.lpi" --build-mode="64-bit" --build-all
 
       # ------------------------------------------------------------------
       # Build allochook DLL (32-bit and 64-bit)
       # ------------------------------------------------------------------
       - name: Build allochook 32-bit
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\allochook\allochook.lpi" --build-mode="32" --build-all
+        run: lazbuild "Cheat Engine\allochook\allochook.lpi" --build-mode="32" --build-all
 
       - name: Build allochook 64-bit
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\allochook\allochook.lpi" --build-mode="64" --build-all
+        run: lazbuild "Cheat Engine\allochook\allochook.lpi" --build-mode="64" --build-all
 
       # ------------------------------------------------------------------
       # Build VEHDebug (32-bit and 64-bit)
       # ------------------------------------------------------------------
       - name: Build VEHDebug 32-bit
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\VEHDebug\vehdebug.lpi" --build-mode="release 32" --build-all
+        run: lazbuild "Cheat Engine\VEHDebug\vehdebug.lpi" --build-mode="release 32" --build-all
 
       - name: Build VEHDebug 64-bit
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\VEHDebug\vehdebug.lpi" --build-mode="release 64" --build-all
+        run: lazbuild "Cheat Engine\VEHDebug\vehdebug.lpi" --build-mode="release 64" --build-all
 
       # ------------------------------------------------------------------
       # Build Tutorial (32-bit and 64-bit)
       # ------------------------------------------------------------------
       - name: Build Tutorial 32-bit
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\Tutorial\tutorial.lpi" --build-mode="release 32-Bit" --build-all
+        run: lazbuild "Cheat Engine\Tutorial\tutorial.lpi" --build-mode="release 32-Bit" --build-all
 
       - name: Build Tutorial 64-bit
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\Tutorial\tutorial.lpi" --build-mode="release 64-Bit" --build-all
+        run: lazbuild "Cheat Engine\Tutorial\tutorial.lpi" --build-mode="release 64-Bit" --build-all
 
       # ------------------------------------------------------------------
-      # Build xmplayer (Default build mode)
+      # Build xmplayer and cecore
       # ------------------------------------------------------------------
       - name: Build xmplayer
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\xmplayer\xmplayer.lpi" --build-all
+        run: lazbuild "Cheat Engine\xmplayer\xmplayer.lpi" --build-all
 
-      # ------------------------------------------------------------------
-      # Build cecore library
-      # ------------------------------------------------------------------
       - name: Build cecore
-        run: C:\lazarus\lazbuild.exe "Cheat Engine\cecore.lpi" --build-all
+        run: lazbuild "Cheat Engine\cecore.lpi" --build-all
 
       # ------------------------------------------------------------------
       # Upload Lazarus build output
       # ------------------------------------------------------------------
       - name: List build output
-        shell: cmd
+        shell: pwsh
         run: |
-          if exist "Cheat Engine\bin" (
-            tree /F "Cheat Engine\bin"
-          ) else (
-            echo "No bin directory found"
-          )
+          if (Test-Path "Cheat Engine\bin") {
+            Get-ChildItem -Recurse "Cheat Engine\bin" | Select-Object FullName
+          } else {
+            Write-Warning "No bin directory found"
+          }
 
       - name: Upload Lazarus artifacts
         uses: actions/upload-artifact@v4
@@ -170,49 +159,63 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       # ------------------------------------------------------------------
-      # DirectX hooks (32-bit and 64-bit release DLLs)
+      # DirectX hooks — projects use v120 (VS 2013) toolset; retarget to
+      # v143 (VS 2022) which is available on the runner.
       # ------------------------------------------------------------------
       - name: Build DirectX hooks Win32
         shell: pwsh
         run: |
           msbuild "Cheat Engine\Direct x mess\Direct x mess.sln" `
-            /p:Configuration=Release /p:Platform=Win32 /m /nologo
+            /p:Configuration=Release /p:Platform=Win32 `
+            /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 `
+            /m /nologo
 
       - name: Build DirectX hooks x64
         shell: pwsh
         run: |
           msbuild "Cheat Engine\Direct x mess\Direct x mess.sln" `
-            /p:Configuration=Release /p:Platform=x64 /m /nologo
+            /p:Configuration=Release /p:Platform=x64 `
+            /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 `
+            /m /nologo
 
       # ------------------------------------------------------------------
-      # MonoDataCollector (outputs to Cheat Engine/bin/autorun/dlls/)
+      # MonoDataCollector — uses v141_xp (VS 2017 XP); retarget to v143.
       # ------------------------------------------------------------------
       - name: Build MonoDataCollector Win32
         shell: pwsh
         run: |
           msbuild "Cheat Engine\MonoDataCollector\MonoDataCollector.sln" `
-            /p:Configuration=Release /p:Platform=Win32 /m /nologo
+            /p:Configuration=Release /p:Platform=Win32 `
+            /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 `
+            /m /nologo
 
       - name: Build MonoDataCollector x64
         shell: pwsh
         run: |
           msbuild "Cheat Engine\MonoDataCollector\MonoDataCollector.sln" `
-            /p:Configuration=Release /p:Platform=x64 /m /nologo
+            /p:Configuration=Release /p:Platform=x64 `
+            /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 `
+            /m /nologo
 
       # ------------------------------------------------------------------
-      # DotNetDataCollector (outputs to Cheat Engine/bin/autorun/dlls/)
+      # DotNetDataCollector — already uses v141/v143; retarget to v143 for
+      # any v141 configs.
       # ------------------------------------------------------------------
       - name: Build DotNetDataCollector Win32
         shell: pwsh
         run: |
           msbuild "Cheat Engine\DotNetDataCollector\DotNetDataCollector.sln" `
-            /p:Configuration=Release /p:Platform=Win32 /m /nologo
+            /p:Configuration=Release /p:Platform=Win32 `
+            /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 `
+            /m /nologo
 
       - name: Build DotNetDataCollector x64
         shell: pwsh
         run: |
           msbuild "Cheat Engine\DotNetDataCollector\DotNetDataCollector.sln" `
-            /p:Configuration=Release /p:Platform=x64 /m /nologo
+            /p:Configuration=Release /p:Platform=x64 `
+            /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 `
+            /m /nologo
 
       # ------------------------------------------------------------------
       # DotNetInvasiveDataCollector (C# — Any CPU)
@@ -244,7 +247,7 @@ jobs:
           path: |
             Cheat Engine/bin/autorun/dlls/
             Cheat Engine/Direct x mess/Release/
-            Cheat Engine/Direct x mess/x64/
+            Cheat Engine/Direct x mess/x64/Release/
           if-no-files-found: warn
 
   # =========================================================================
@@ -258,20 +261,38 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Install WDK — required for WindowsKernelModeDriver10.0 toolset
-      - name: Install Windows Driver Kit (WDK)
+      # ------------------------------------------------------------------
+      # Download and install the WDK — required for the
+      # WindowsKernelModeDriver10.0 platform toolset used by DBKKernel.
+      # The WDK installer is ~1.5 GB; allow up to 15 minutes.
+      # ------------------------------------------------------------------
+      - name: Download WDK installer
         shell: pwsh
         run: |
-          Write-Host "Installing WDK via Chocolatey..."
-          choco install windows-driver-kit-11 -y --no-progress
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "WDK installation failed with exit code $LASTEXITCODE"
-            exit $LASTEXITCODE
+          Write-Host "Downloading WDK for Windows 11 22H2 (~1.5 GB)..."
+          curl.exe -L --retry 3 --retry-delay 10 -o wdksetup.exe `
+            "https://go.microsoft.com/fwlink/?linkid=2196230"
+          if ($LASTEXITCODE -ne 0) { Write-Error "WDK download failed"; exit 1 }
+          Write-Host "Download complete."
+
+      - name: Install WDK silently
+        shell: pwsh
+        run: |
+          Write-Host "Installing WDK (this may take several minutes)..."
+          $proc = Start-Process -FilePath ".\wdksetup.exe" `
+            -ArgumentList "/quiet /norestart" -Wait -PassThru
+          if ($proc.ExitCode -notin @(0, 3010)) {
+            Write-Error "WDK installer exited with code $($proc.ExitCode)"
+            exit $proc.ExitCode
           }
-          # Refresh environment so msbuild can find WDK props
+          Write-Host "WDK installed (exit code $($proc.ExitCode))."
+
+      - name: Set WDKContentRoot environment variable
+        shell: pwsh
+        run: |
           $wdkRoot = "C:\Program Files (x86)\Windows Kits\10\"
-          [System.Environment]::SetEnvironmentVariable("WDKContentRoot", $wdkRoot, "Machine")
-          Write-Host "WDK installed. WDKContentRoot=$wdkRoot"
+          echo "WDKContentRoot=$wdkRoot" >> $env:GITHUB_ENV
+          Write-Host "WDKContentRoot=$wdkRoot"
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -320,8 +341,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Enable i386 architecture and install dependencies
         run: |
+          sudo dpkg --add-architecture i386
           sudo apt-get update -qq
           sudo apt-get install -y gcc gcc-multilib zlib1g-dev zlib1g-dev:i386
 
@@ -397,8 +419,8 @@ jobs:
         continue-on-error: true
 
       - name: List release contents
-        shell: cmd
-        run: tree /F release
+        shell: pwsh
+        run: Get-ChildItem -Recurse release | Select-Object FullName
 
       - name: Create release archive
         shell: pwsh
