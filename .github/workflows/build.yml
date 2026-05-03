@@ -39,10 +39,14 @@ jobs:
         run: |
           $ver = $env:LAZARUS_VERSION
           $fpc = $env:FPC_VERSION
-          $url = "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%20$ver/lazarus-$ver-fpc-$fpc-cross-i386-win32-win64.exe/download"
+          # Use downloads.sourceforge.net direct-download URL (bypasses JavaScript waiting page)
+          $url = "https://downloads.sourceforge.net/project/lazarus/Lazarus%20Windows%2064%20bits/Lazarus%20$ver/lazarus-$ver-fpc-$fpc-cross-i386-win32-win64.exe"
           Write-Host "Downloading cross-compiler: $url"
-          curl.exe -L -A "Mozilla/5.0" --retry 3 --retry-delay 5 -o lazarus-cross-i386.exe $url
+          curl.exe -L --retry 3 --retry-delay 5 -o lazarus-cross-i386.exe $url
           if ($LASTEXITCODE -ne 0) { Write-Error "Cross-compiler download failed"; exit 1 }
+          $size = (Get-Item lazarus-cross-i386.exe).Length
+          Write-Host "Downloaded $size bytes"
+          if ($size -lt 100000) { Write-Error "File too small ($size bytes) - likely an HTML error page"; exit 1 }
 
       - name: Install i386-win32 cross-compiler
         shell: pwsh
@@ -162,6 +166,8 @@ jobs:
       # Install Microsoft.DXSDK.D3DX NuGet package to get the legacy
       # d3dx9.h / d3dx10.h / d3dx11.h headers that the DirectX hook
       # projects require (not shipped with the modern Windows SDK).
+      # VS2022 MSBuild no longer includes $(INCLUDE) in IncludePath, so
+      # we inject the paths via Directory.Build.props instead.
       # ------------------------------------------------------------------
       - name: Install DirectX SDK headers (Microsoft.DXSDK.D3DX NuGet)
         shell: pwsh
@@ -169,11 +175,37 @@ jobs:
           nuget install Microsoft.DXSDK.D3DX -Version 9.29.952.8 `
             -OutputDirectory "$env:TEMP\nuget" -NonInteractive -Source https://api.nuget.org/v3/index.json
           $pkg = (Get-ChildItem "$env:TEMP\nuget\Microsoft.DXSDK.D3DX.*" -Directory | Select-Object -First 1).FullName
-          $inc = "$pkg\build\native\include"
-          Write-Host "DXSDK include: $inc"
-          # Prepend to INCLUDE so cl.exe finds d3dx*.h before the Windows SDK
-          $existing = [System.Environment]::GetEnvironmentVariable('INCLUDE', 'Process')
-          echo "INCLUDE=$inc;$existing" >> $env:GITHUB_ENV
+          $inc  = "$pkg\build\native\include"
+          $libX86 = "$pkg\build\native\lib\x86"
+          $libX64 = "$pkg\build\native\lib\x64"
+          Write-Host "DXSDK include : $inc"
+          Write-Host "DXSDK lib x86 : $libX86"
+          Write-Host "DXSDK lib x64 : $libX64"
+          # Write Directory.Build.props so MSBuild picks up the headers/libs
+          # for every project inside "Direct x mess\" (VS2022 no longer
+          # exposes $(INCLUDE) through IncludePath).
+          $props = @"
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'`$(Platform)'=='Win32'">
+    <Link>
+      <AdditionalLibraryDirectories>$libX86;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'`$(Platform)'=='x64'">
+    <Link>
+      <AdditionalLibraryDirectories>$libX64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+  </ItemDefinitionGroup>
+</Project>
+"@
+          $props | Set-Content "Cheat Engine\Direct x mess\Directory.Build.props" -Encoding UTF8
+          Write-Host "Wrote Directory.Build.props"
 
       # ------------------------------------------------------------------
       # DirectX hooks — projects use v120 (VS 2013) toolset; retarget to
@@ -314,14 +346,15 @@ jobs:
             Sort-Object Name -Descending | Select-Object -First 1
           if ($kmVer) {
             Write-Host "WDK km headers found: $($kmVer.FullName)\km"
-            echo "WDKContentRoot=$wdkRoot" >> $env:GITHUB_ENV
-            echo "WindowsDriverKitDir=$wdkRoot" >> $env:GITHUB_ENV
+            echo "WDKContentRoot=$wdkRoot"        >> $env:GITHUB_ENV
+            echo "WindowsDriverKitDir=$wdkRoot"   >> $env:GITHUB_ENV
+            echo "WDKVersion=$($kmVer.Name)"      >> $env:GITHUB_ENV
           } else {
             Write-Host "WDK km headers not yet visible; listing Include dirs:"
             Get-ChildItem "$wdkRoot\Include" -ErrorAction SilentlyContinue | Format-Table Name
             Write-Host "Falling back to hardcoded WDKContentRoot"
-            echo "WDKContentRoot=$wdkRoot" >> $env:GITHUB_ENV
-            echo "WindowsDriverKitDir=$wdkRoot" >> $env:GITHUB_ENV
+            echo "WDKContentRoot=$wdkRoot"        >> $env:GITHUB_ENV
+            echo "WindowsDriverKitDir=$wdkRoot"   >> $env:GITHUB_ENV
           }
 
       - name: Setup MSBuild
@@ -334,7 +367,8 @@ jobs:
           msbuild DBKKernel\DBKKernel.sln `
             /p:Configuration=Release /p:Platform=x64 /m /nologo `
             /p:WindowsDriverKitDir="$env:WindowsDriverKitDir" `
-            /p:WDKContentRoot="$env:WDKContentRoot"
+            /p:WDKContentRoot="$env:WDKContentRoot" `
+            /p:WDKVersion="$env:WDKVersion"
 
       - name: Build DBKKernel Win32
         shell: pwsh
@@ -342,7 +376,8 @@ jobs:
           msbuild DBKKernel\DBKKernel.sln `
             /p:Configuration=Release /p:Platform=Win32 /m /nologo `
             /p:WindowsDriverKitDir="$env:WindowsDriverKitDir" `
-            /p:WDKContentRoot="$env:WDKContentRoot"
+            /p:WDKContentRoot="$env:WDKContentRoot" `
+            /p:WDKVersion="$env:WDKVersion"
 
       # Collect .sys + .inf output files
       - name: Locate driver output files
