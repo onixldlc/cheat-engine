@@ -264,9 +264,14 @@ jobs:
         run: |
           Write-Host "Installing WDK via Chocolatey..."
           choco install windows-driver-kit-11 -y --no-progress
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "WDK installation failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
           # Refresh environment so msbuild can find WDK props
-          $env:WDKContentRoot = "C:\Program Files (x86)\Windows Kits\10\"
-          [System.Environment]::SetEnvironmentVariable("WDKContentRoot", $env:WDKContentRoot, "Machine")
+          $wdkRoot = "C:\Program Files (x86)\Windows Kits\10\"
+          [System.Environment]::SetEnvironmentVariable("WDKContentRoot", $wdkRoot, "Machine")
+          Write-Host "WDK installed. WDKContentRoot=$wdkRoot"
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -357,7 +362,9 @@ jobs:
       - build-driver
       - build-ceserver
     if: >-
-      always() &&
+      !cancelled() &&
+      (needs.build-lazarus.result == 'success' || needs.build-msvc.result == 'success' ||
+       needs.build-driver.result == 'success' || needs.build-ceserver.result == 'success') &&
       (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
 
     steps:
@@ -394,8 +401,8 @@ jobs:
         run: tree /F release
 
       - name: Create release archive
-        shell: cmd
-        run: 7z a CheatEngine-%GITHUB_SHA%.zip .\release\*
+        shell: pwsh
+        run: 7z a "CheatEngine-${{ github.sha }}.zip" .\release\*
 
       - name: Upload release archive
         uses: actions/upload-artifact@v4
