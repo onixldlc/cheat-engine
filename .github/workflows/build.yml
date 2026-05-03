@@ -184,27 +184,30 @@ jobs:
           # Write Directory.Build.props so MSBuild picks up the headers/libs
           # for every project inside "Direct x mess\" (VS2022 no longer
           # exposes $(INCLUDE) through IncludePath).
-          $props = @"
-<?xml version="1.0" encoding="utf-8"?>
-<Project>
-  <ItemDefinitionGroup>
-    <ClCompile>
-      <AdditionalIncludeDirectories>$inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-    </ClCompile>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'`$(Platform)'=='Win32'">
-    <Link>
-      <AdditionalLibraryDirectories>$libX86;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-    </Link>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'`$(Platform)'=='x64'">
-    <Link>
-      <AdditionalLibraryDirectories>$libX64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-    </Link>
-  </ItemDefinitionGroup>
-</Project>
-"@
-          $props | Set-Content "Cheat Engine\Direct x mess\Directory.Build.props" -Encoding UTF8
+          # NOTE: PowerShell here-strings require the closing "@ at column 0,
+          # which breaks YAML indentation — use a string array joined with
+          # newlines instead.
+          $lines = @(
+            '<?xml version="1.0" encoding="utf-8"?>',
+            '<Project>',
+            '  <ItemDefinitionGroup>',
+            '    <ClCompile>',
+            "      <AdditionalIncludeDirectories>$inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>",
+            '    </ClCompile>',
+            '  </ItemDefinitionGroup>',
+            "  <ItemDefinitionGroup Condition=`"'`$(Platform)'=='Win32'`">",
+            '    <Link>',
+            "      <AdditionalLibraryDirectories>$libX86;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>",
+            '    </Link>',
+            '  </ItemDefinitionGroup>',
+            "  <ItemDefinitionGroup Condition=`"'`$(Platform)'=='x64'`">",
+            '    <Link>',
+            "      <AdditionalLibraryDirectories>$libX64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>",
+            '    </Link>',
+            '  </ItemDefinitionGroup>',
+            '</Project>'
+          )
+          $lines -join "`n" | Set-Content "Cheat Engine\Direct x mess\Directory.Build.props" -Encoding UTF8
           Write-Host "Wrote Directory.Build.props"
 
       # ------------------------------------------------------------------
