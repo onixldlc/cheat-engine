@@ -10,6 +10,7 @@ on:
       - 'fix/**'
     tags:
       - 'v*'
+  pull_request:
   workflow_dispatch:
     inputs:
       create_release:
@@ -22,485 +23,299 @@ permissions:
   contents: write
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Shared MSBuild properties used across all C++ jobs
+# Concurrency: cancel any in-progress runs on the same ref
 # ─────────────────────────────────────────────────────────────────────────────
-env:
-  MSBUILD_COMMON: >-
-    /p:WindowsTargetPlatformVersion=10.0
-    /m
-    /nologo
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
 # ═════════════════════════════════════════════════════════════════════════════
-# JOB 1 – Lazarus / Free Pascal projects
-#   • speedhack.lpi      (32-bit + 64-bit DLL)
-#   • luaclient.lpi      (32-bit + 64-bit DLL)
-#   • vehdebug.lpi       (32-bit + 64-bit DLL)
-#   • cheatengine.lpi    (32-bit + 64-bit EXE)
+# JOB 1 – Main build job (Lazarus + VS C++ + .NET + TCC + DBK)
+#   Uses windows-latest to avoid runner queue issues
 # ═════════════════════════════════════════════════════════════════════════════
-  build-lazarus:
-    name: "Lazarus – speedhack / luaclient / vehdebug / CE"
-    runs-on: windows-2019
+  build:
+    name: "Build All Components"
+    runs-on: windows-latest
+
     steps:
-      - name: Checkout
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Lazarus 2.2.2
-        uses: ./.github/actions/setup-lazarus
+      # ── Lazarus toolchain ───────────────────────────────────────────────────
+      - name: Install Lazarus 2.2.2
+        uses: gcarreno/setup-lazarus@v3
+        with:
+          lazarus-version: "2.2.2"
+          with-cache: false
+
+      - name: Install FPC cross-compiler (i386-win32)
+        shell: pwsh
+        run: |
+          Write-Host "Downloading i386-win32 cross-compiler..."
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest `
+            -Uri "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%202.2.2/lazarus-2.2.2-fpc-3.2.2-cross-i386-win32-win64.exe/download" `
+            -OutFile "cross-i386.exe" -MaximumRetryCount 5 -RetryIntervalSec 10
+          Write-Host "Installing cross-compiler..."
+          Start-Process -Wait -FilePath ".\cross-i386.exe" `
+            -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'
+          Write-Host "Cross-compiler installed."
+
+      # ── Visual Studio toolchain ─────────────────────────────────────────────
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # ── MinGW (for tcclib) ──────────────────────────────────────────────────
+      - name: Install MinGW (for TCC build)
+        shell: cmd
+        run: choco install mingw -y --no-progress
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # LAZARUS PROJECTS
+      # ═══════════════════════════════════════════════════════════════════════
 
       # ── speedhack ──────────────────────────────────────────────────────────
       - name: Build speedhack (32-bit)
         working-directory: "Cheat Engine/speedhack"
-        run: C:\lazarus\lazbuild.exe speedhack.lpi --build-mode="32-bit" --build-all
         shell: cmd
+        continue-on-error: true
+        run: lazbuild speedhack.lpi --build-mode="32-bit" --build-all
 
       - name: Build speedhack (64-bit)
         working-directory: "Cheat Engine/speedhack"
-        run: C:\lazarus\lazbuild.exe speedhack.lpi --build-mode="64-bit" --build-all
         shell: cmd
+        continue-on-error: true
+        run: lazbuild speedhack.lpi --build-mode="64-bit" --build-all
 
       # ── luaclient ──────────────────────────────────────────────────────────
       - name: Build luaclient (32-bit)
         working-directory: "Cheat Engine/luaclient"
-        run: C:\lazarus\lazbuild.exe luaclient.lpi --build-mode="Release 32" --build-all
         shell: cmd
+        continue-on-error: true
+        run: lazbuild luaclient.lpi --build-mode="Release 32" --build-all
 
       - name: Build luaclient (64-bit)
         working-directory: "Cheat Engine/luaclient"
-        run: C:\lazarus\lazbuild.exe luaclient.lpi --build-mode="Release 64" --build-all
         shell: cmd
+        continue-on-error: true
+        run: lazbuild luaclient.lpi --build-mode="Release 64" --build-all
 
       # ── VEHDebug ───────────────────────────────────────────────────────────
       - name: Build VEHDebug (32-bit)
         working-directory: "Cheat Engine/VEHDebug"
-        run: C:\lazarus\lazbuild.exe vehdebug.lpi --build-mode="release 32" --build-all
         shell: cmd
+        continue-on-error: true
+        run: lazbuild vehdebug.lpi --build-mode="release 32" --build-all
 
       - name: Build VEHDebug (64-bit)
         working-directory: "Cheat Engine/VEHDebug"
-        run: C:\lazarus\lazbuild.exe vehdebug.lpi --build-mode="release 64" --build-all
         shell: cmd
+        continue-on-error: true
+        run: lazbuild vehdebug.lpi --build-mode="release 64" --build-all
 
-      # ── Cheat Engine (main) ────────────────────────────────────────────────
+      # ── Cheat Engine (main EXE) ────────────────────────────────────────────
       - name: Build Cheat Engine (32-bit)
         working-directory: "Cheat Engine"
-        run: C:\lazarus\lazbuild.exe cheatengine.lpi --build-mode="Release 32-Bit" --build-all
         shell: cmd
+        continue-on-error: true
+        run: lazbuild cheatengine.lpi --build-mode="Release 32-Bit" --build-all
 
       - name: Build Cheat Engine (64-bit)
         working-directory: "Cheat Engine"
-        run: C:\lazarus\lazbuild.exe cheatengine.lpi --build-mode="Release 64-Bit" --build-all
         shell: cmd
+        continue-on-error: true
+        run: lazbuild cheatengine.lpi --build-mode="Release 64-Bit" --build-all
 
-      # ── Collect & upload ───────────────────────────────────────────────────
-      - name: List Lazarus build output
-        shell: powershell
-        run: |
-          Write-Host "=== Lazarus build output ==="
-          Get-ChildItem -Path "Cheat Engine\bin" -Recurse -Include "*.exe","*.dll" |
-            Sort-Object FullName |
-            Format-Table FullName, Length -AutoSize
-
-      - name: Upload Lazarus build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: lazarus-build
-          path: |
-            Cheat Engine/bin/**
-          if-no-files-found: warn
-
-# ═════════════════════════════════════════════════════════════════════════════
-# JOB 2 – Visual Studio C++ projects
-#   • DirectXMess.sln        (32-bit + 64-bit DLL)
-#   • MonoDataCollector.sln  (32-bit + 64-bit DLL)
-#   • DotNetDataCollector.sln(32-bit + 64-bit EXE)
-#   • CEJVMTI.sln            (32-bit + 64-bit DLL)
-# ═════════════════════════════════════════════════════════════════════════════
-  build-vs-cpp:
-    name: "VS C++ – DirectXMess / Mono / DotNetDC / CEJVMTI"
-    runs-on: windows-2019
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
+      # ═══════════════════════════════════════════════════════════════════════
+      # VISUAL STUDIO C++ PROJECTS
+      # ═══════════════════════════════════════════════════════════════════════
 
       # ── DirectX Mess ───────────────────────────────────────────────────────
-      - name: Build DirectXMess Win32
-        continue-on-error: true
+      - name: Build DirectXMess (Win32 + x64)
         working-directory: "Cheat Engine/Direct x mess"
-        run: >-
-          msbuild "Direct x mess.sln"
-          /p:Configuration=Release /p:Platform=Win32
-          /p:PlatformToolset=v142
-          ${{ env.MSBUILD_COMMON }}
-          /t:Rebuild
         shell: cmd
-
-      - name: Build DirectXMess x64
         continue-on-error: true
-        working-directory: "Cheat Engine/Direct x mess"
-        run: >-
-          msbuild "Direct x mess.sln"
-          /p:Configuration=Release /p:Platform=x64
-          /p:PlatformToolset=v142
-          ${{ env.MSBUILD_COMMON }}
-          /t:Rebuild
-        shell: cmd
+        run: |
+          msbuild "Direct x mess.sln" /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 /m /t:Rebuild
+          msbuild "Direct x mess.sln" /p:Configuration=Release /p:Platform=x64   /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 /m /t:Rebuild
 
       # ── MonoDataCollector ──────────────────────────────────────────────────
-      - name: Build MonoDataCollector Win32
-        continue-on-error: true
+      - name: Build MonoDataCollector (Win32 + x64)
         working-directory: "Cheat Engine/MonoDataCollector"
-        run: >-
-          msbuild MonoDataCollector.sln
-          /p:Configuration=Release /p:Platform=Win32
-          /p:PlatformToolset=v142
-          ${{ env.MSBUILD_COMMON }}
-          /t:Rebuild
         shell: cmd
-
-      - name: Build MonoDataCollector x64
         continue-on-error: true
-        working-directory: "Cheat Engine/MonoDataCollector"
-        run: >-
-          msbuild MonoDataCollector.sln
-          /p:Configuration=Release /p:Platform=x64
-          /p:PlatformToolset=v142
-          ${{ env.MSBUILD_COMMON }}
-          /t:Rebuild
-        shell: cmd
+        run: |
+          msbuild MonoDataCollector.sln /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 /m /t:Rebuild
+          msbuild MonoDataCollector.sln /p:Configuration=Release /p:Platform=x64   /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 /m /t:Rebuild
 
       # ── DotNetDataCollector ────────────────────────────────────────────────
-      - name: Build DotNetDataCollector Win32
-        continue-on-error: true
+      - name: Build DotNetDataCollector (Win32 + x64)
         working-directory: "Cheat Engine/DotNetDataCollector"
-        run: >-
-          msbuild DotNetDataCollector.sln
-          /p:Configuration=Release /p:Platform=Win32
-          /p:PlatformToolset=v142
-          ${{ env.MSBUILD_COMMON }}
-          /t:Rebuild
         shell: cmd
-
-      - name: Build DotNetDataCollector x64
         continue-on-error: true
-        working-directory: "Cheat Engine/DotNetDataCollector"
-        run: >-
-          msbuild DotNetDataCollector.sln
-          /p:Configuration=Release /p:Platform=x64
-          /p:PlatformToolset=v142
-          ${{ env.MSBUILD_COMMON }}
-          /t:Rebuild
-        shell: cmd
-
-      # ── CEJVMTI (Java inspection DLL) ──────────────────────────────────────
-      - name: Resolve JAVA_HOME for CEJVMTI headers
-        id: java-home
-        continue-on-error: true
-        shell: powershell
         run: |
-          $candidates = @(
+          msbuild DotNetDataCollector.sln /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 /m /t:Rebuild
+          msbuild DotNetDataCollector.sln /p:Configuration=Release /p:Platform=x64   /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 /m /t:Rebuild
+
+      # ── CEJVMTI ────────────────────────────────────────────────────────────
+      - name: Detect JAVA_HOME for CEJVMTI
+        id: java
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $jdk = @(
             $env:JAVA_HOME_11_X64,
             $env:JAVA_HOME_17_X64,
             $env:JAVA_HOME_8_X64,
-            $env:JAVA_HOME,
-            "C:\hostedtoolcache\windows\Java_Temurin-Hotspot_jdk\11.0*\x64",
-            "C:\Program Files\Java\jdk*"
+            $env:JAVA_HOME
           ) | Where-Object { $_ -and (Test-Path "$_\include\jvmti.h") } | Select-Object -First 1
-          if ($candidates) {
-            Write-Host "Found JDK at: $candidates"
-            "CEJVMTI_JAVA_HOME=$candidates" | Out-File -FilePath $env:GITHUB_ENV -Append
+          if ($jdk) {
+            Write-Host "JDK with jvmti.h: $jdk"
+            "CEJVMTI_JDK=$jdk" | Out-File -FilePath $env:GITHUB_ENV -Append
           } else {
-            Write-Warning "Could not locate JDK with jvmti.h – CEJVMTI build may fail"
+            Write-Warning "Could not find JDK with jvmti.h"
           }
 
-      - name: Build CEJVMTI Win32
-        continue-on-error: true
+      - name: Build CEJVMTI (Win32 + x64)
         working-directory: "Cheat Engine/Java/CEJVMTI"
         shell: cmd
-        run: >-
-          msbuild CEJVMTI.sln
-          /p:Configuration=Release /p:Platform=Win32
-          /p:PlatformToolset=v142
-          "/p:AdditionalIncludeDirectories=%CEJVMTI_JAVA_HOME%\include;%CEJVMTI_JAVA_HOME%\include\win32"
-          ${{ env.MSBUILD_COMMON }}
-          /t:Rebuild
-
-      - name: Build CEJVMTI x64
         continue-on-error: true
-        working-directory: "Cheat Engine/Java/CEJVMTI"
-        shell: cmd
-        run: >-
-          msbuild CEJVMTI.sln
-          /p:Configuration=Release /p:Platform=x64
-          /p:PlatformToolset=v142
-          "/p:AdditionalIncludeDirectories=%CEJVMTI_JAVA_HOME%\include;%CEJVMTI_JAVA_HOME%\include\win32"
-          ${{ env.MSBUILD_COMMON }}
-          /t:Rebuild
-
-      # ── Collect output ─────────────────────────────────────────────────────
-      - name: List VS C++ build output
-        shell: powershell
         run: |
-          Write-Host "=== VS C++ output in Cheat Engine\bin ==="
-          if (Test-Path "Cheat Engine\bin") {
-            Get-ChildItem -Path "Cheat Engine\bin" -Recurse -Include "*.exe","*.dll" |
-              Sort-Object FullName | Format-Table FullName, Length -AutoSize
-          }
-          Write-Host "=== DirectXMess Release output ==="
-          Get-ChildItem -Path "Cheat Engine\Direct x mess" -Recurse -Include "*.dll" `
-            -ErrorAction SilentlyContinue | Sort-Object FullName | Format-Table FullName, Length -AutoSize
+          msbuild CEJVMTI.sln /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 "/p:AdditionalIncludeDirectories=%CEJVMTI_JDK%\include;%CEJVMTI_JDK%\include\win32" /m /t:Rebuild
+          msbuild CEJVMTI.sln /p:Configuration=Release /p:Platform=x64   /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 "/p:AdditionalIncludeDirectories=%CEJVMTI_JDK%\include;%CEJVMTI_JDK%\include\win32" /m /t:Rebuild
 
-      - name: Upload VS C++ artifacts
+      # ═══════════════════════════════════════════════════════════════════════
+      # .NET / C# PROJECTS
+      # ═══════════════════════════════════════════════════════════════════════
+
+      - name: Build CSCompiler (.NET)
+        working-directory: "Cheat Engine/DotNetCompiler/CSCompiler"
+        shell: cmd
+        continue-on-error: true
+        run: msbuild CSCompiler.sln /p:Configuration=Release /p:Platform="Any CPU" /nologo /m /t:Rebuild
+
+      - name: Build DotNetInvasiveDataCollector (.NET)
+        working-directory: "Cheat Engine/DotNetInvasiveDataCollector"
+        shell: cmd
+        continue-on-error: true
+        run: msbuild DotNetInvasiveDataCollector.sln /p:Configuration=Release /p:Platform="Any CPU" /p:SignAssembly=false /nologo /m /t:Rebuild
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # TCC LIBRARY (MinGW build)
+      # ═══════════════════════════════════════════════════════════════════════
+
+      - name: Build TCC Library (32-bit + 64-bit)
+        working-directory: "Cheat Engine/tcclib/win32"
+        shell: cmd
+        continue-on-error: true
+        run: |
+          build-tcc.bat -t 32 -x
+          build-tcc.bat -t 64 -x
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # DBK KERNEL DRIVER (best-effort, requires WDK)
+      # ═══════════════════════════════════════════════════════════════════════
+
+      - name: Install Windows Driver Kit (WDK)
+        shell: cmd
+        continue-on-error: true
+        run: choco install windows-driver-kit-10 -y --no-progress
+
+      - name: Build DBKKernel (x64 + Win32 – no-sig)
+        working-directory: DBKKernel
+        shell: cmd
+        continue-on-error: true
+        run: |
+          msbuild DBKKernel.sln "/p:Configuration=Release without sig" /p:Platform=x64   /p:WindowsTargetPlatformVersion=10.0 /nologo /m /t:Rebuild
+          msbuild DBKKernel.sln "/p:Configuration=Release without sig" /p:Platform=Win32 /p:WindowsTargetPlatformVersion=10.0 /nologo /m /t:Rebuild
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # COLLECT & UPLOAD ARTIFACTS
+      # ═══════════════════════════════════════════════════════════════════════
+
+      - name: Show build outputs
+        shell: pwsh
+        run: |
+          Write-Host "=== Cheat Engine bin/ ==="
+          if (Test-Path "Cheat Engine\bin") {
+            Get-ChildItem -Path "Cheat Engine\bin" -Recurse -Include "*.exe","*.dll","*.sys","*.inf" |
+              Sort-Object FullName | Format-Table Name, Length, Directory -AutoSize
+          }
+          Write-Host "=== DirectX Mess output ==="
+          Get-ChildItem -Path "Cheat Engine\Direct x mess" -Recurse -Include "*.dll" `
+            -ErrorAction SilentlyContinue | Sort-Object FullName | Format-Table Name, Length -AutoSize
+          Write-Host "=== DBKKernel output ==="
+          Get-ChildItem -Path "DBKKernel" -Recurse -Include "*.sys","*.inf" `
+            -ErrorAction SilentlyContinue | Sort-Object FullName | Format-Table Name, Length -AutoSize
+          Write-Host "=== TCC output ==="
+          Get-ChildItem -Path "Cheat Engine\tcclib\win32" -Include "*.exe","*.dll" `
+            -ErrorAction SilentlyContinue | Sort-Object FullName | Format-Table Name, Length -AutoSize
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: vs-cpp-build
+          name: CheatEngine-Build-${{ github.run_number }}
           path: |
             Cheat Engine/bin/**
             Cheat Engine/Direct x mess/Release/**
             Cheat Engine/Direct x mess/x64/Release/**
-          if-no-files-found: warn
-
-# ═════════════════════════════════════════════════════════════════════════════
-# JOB 3 – .NET / C# projects
-#   • CSCompiler.sln                   (C# DLL → Cheat Engine/bin/)
-#   • DotNetInvasiveDataCollector.sln  (C# DLL → Cheat Engine/bin/autorun/dlls/)
-# ═════════════════════════════════════════════════════════════════════════════
-  build-dotnet:
-    name: ".NET – CSCompiler / DotNetInvasive"
-    runs-on: windows-2019
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: |
-            6.x
-            8.x
-
-      # ── CSCompiler ─────────────────────────────────────────────────────────
-      - name: Build CSCompiler
-        working-directory: "Cheat Engine/DotNetCompiler/CSCompiler"
-        run: >-
-          msbuild CSCompiler.sln
-          /p:Configuration=Release
-          /p:Platform="Any CPU"
-          /nologo /m /t:Rebuild
-        shell: cmd
-
-      # ── DotNetInvasiveDataCollector ────────────────────────────────────────
-      - name: Build DotNetInvasiveDataCollector
-        continue-on-error: true
-        working-directory: "Cheat Engine/DotNetInvasiveDataCollector"
-        run: >-
-          msbuild DotNetInvasiveDataCollector.sln
-          /p:Configuration=Release
-          /p:Platform="Any CPU"
-          /p:SignAssembly=false
-          /nologo /m /t:Rebuild
-        shell: cmd
-
-      # ── Collect & upload ───────────────────────────────────────────────────
-      - name: List .NET build output
-        shell: powershell
-        run: |
-          Write-Host "=== .NET output ==="
-          Get-ChildItem -Path "Cheat Engine\bin" -Recurse -Include "*.dll","*.exe" `
-            -ErrorAction SilentlyContinue |
-            Sort-Object FullName | Format-Table FullName, Length -AutoSize
-          Get-ChildItem -Path "Cheat Engine\DotNetCompiler" -Recurse -Include "*.dll" `
-            -ErrorAction SilentlyContinue |
-            Sort-Object FullName | Format-Table FullName, Length -AutoSize
-
-      - name: Upload .NET artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dotnet-build
-          path: |
-            Cheat Engine/bin/**
-            Cheat Engine/DotNetCompiler/CSCompiler/CSCompiler/bin/Release/**
-          if-no-files-found: warn
-
-# ═════════════════════════════════════════════════════════════════════════════
-# JOB 4 – TCC Library (tinycc)
-#   Builds libtcc.dll (32-bit and 64-bit) using MinGW GCC
-# ═════════════════════════════════════════════════════════════════════════════
-  build-tcclib:
-    name: "TCC – 32-bit + 64-bit"
-    runs-on: windows-2019
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install MinGW via Chocolatey
-        run: choco install mingw -y --no-progress
-        shell: cmd
-
-      - name: Add MinGW to PATH
-        shell: powershell
-        run: |
-          $mingwBin = "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin"
-          if (-not (Test-Path $mingwBin)) {
-            $mingwBin = (Get-ChildItem "C:\ProgramData\chocolatey\lib\mingw" -Recurse -Filter "gcc.exe" |
-              Select-Object -First 1).DirectoryName
-          }
-          Write-Host "MinGW bin: $mingwBin"
-          "$mingwBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Verify GCC
-        run: gcc --version
-        shell: cmd
-
-      - name: Build TCC 32-bit
-        working-directory: "Cheat Engine/tcclib/win32"
-        run: build-tcc.bat -t 32 -x
-        shell: cmd
-
-      - name: Build TCC 64-bit
-        working-directory: "Cheat Engine/tcclib/win32"
-        run: build-tcc.bat -t 64 -x
-        shell: cmd
-
-      - name: List TCC output
-        shell: cmd
-        run: |
-          echo === TCC build output ===
-          dir /b "Cheat Engine\tcclib\win32\*.exe" 2>nul || echo (no .exe)
-          dir /b "Cheat Engine\tcclib\win32\*.dll" 2>nul || echo (no .dll)
-
-      - name: Upload TCC artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: tcclib-build
-          path: |
             Cheat Engine/tcclib/win32/*.exe
             Cheat Engine/tcclib/win32/*.dll
             Cheat Engine/tcclib/win32/lib/*.a
-          if-no-files-found: warn
-
-# ═════════════════════════════════════════════════════════════════════════════
-# JOB 5 – DBK Kernel Driver (best-effort)
-#   Requires Windows Driver Kit; uses "Release without sig" config
-# ═════════════════════════════════════════════════════════════════════════════
-  build-dbkkernel:
-    name: "DBK Kernel Driver (best-effort)"
-    runs-on: windows-2019
-    continue-on-error: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Windows Driver Kit
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Write-Host "Installing WDK via Chocolatey..."
-          choco install windows-driver-kit-10 -y --no-progress 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Warning "WDK install may have partially failed (exit: $LASTEXITCODE)"
-          }
-
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Build DBKKernel x64 (Release without sig)
-        continue-on-error: true
-        working-directory: DBKKernel
-        run: >-
-          msbuild DBKKernel.sln
-          "/p:Configuration=Release without sig"
-          /p:Platform=x64
-          /p:WindowsTargetPlatformVersion=10.0
-          /nologo /m /t:Rebuild
-        shell: cmd
-
-      - name: Build DBKKernel Win32 (Release without sig)
-        continue-on-error: true
-        working-directory: DBKKernel
-        run: >-
-          msbuild DBKKernel.sln
-          "/p:Configuration=Release without sig"
-          /p:Platform=Win32
-          /p:WindowsTargetPlatformVersion=10.0
-          /nologo /m /t:Rebuild
-        shell: cmd
-
-      - name: Upload DBKKernel artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dbkkernel-build
-          path: |
-            DBKKernel/**/Release without sig/**/*.sys
-            DBKKernel/**/Release without sig/**/*.inf
-            DBKKernel/**/x64/**/*.sys
             DBKKernel/**/*.sys
             DBKKernel/**/*.inf
           if-no-files-found: warn
 
 # ═════════════════════════════════════════════════════════════════════════════
-# JOB 6 – Package everything and create a GitHub Release
-#   Runs on tag push (v*) or manual dispatch with create_release=true
+# JOB 2 – GitHub Release (only on tags or manual trigger)
 # ═════════════════════════════════════════════════════════════════════════════
-  create-release:
-    name: "Package & Release"
-    needs:
-      - build-lazarus
-      - build-vs-cpp
-      - build-dotnet
-      - build-tcclib
-      - build-dbkkernel
-    # Run even if some jobs failed/skipped
+  release:
+    name: "Create GitHub Release"
+    needs: build
     if: >-
-      always() &&
+      always() && needs.build.result != 'cancelled' &&
       (
         startsWith(github.ref, 'refs/tags/v') ||
         (github.event_name == 'workflow_dispatch' && inputs.create_release == true)
       )
     runs-on: ubuntu-latest
+
     steps:
-      - name: Download all build artifacts
+      - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
-          path: release-staging/
+          name: CheatEngine-Build-${{ github.run_number }}
+          path: release-files/
 
-      - name: List all downloaded files
-        run: |
-          echo "=== Release staging contents ==="
-          find release-staging/ -type f | sort
+      - name: List release files
+        run: find release-files/ -type f | sort
 
-      - name: Determine release tag / version
-        id: version
+      - name: Determine version tag
+        id: ver
         run: |
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           else
-            TAG="build-$(echo $GITHUB_SHA | cut -c1-8)"
+            echo "tag=build-$(echo $GITHUB_SHA | cut -c1-8)" >> "$GITHUB_OUTPUT"
           fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Release tag: $TAG"
 
-      - name: Create release ZIP
+      - name: Package release ZIP
         run: |
-          cd release-staging
-          zip -r "../CheatEngine-${{ steps.version.outputs.tag }}.zip" .
-          ls -lh "../CheatEngine-${{ steps.version.outputs.tag }}.zip"
+          cd release-files
+          zip -r "../CheatEngine-${{ steps.ver.outputs.tag }}.zip" .
+          ls -lh "../CheatEngine-${{ steps.ver.outputs.tag }}.zip"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: "Cheat Engine ${{ steps.version.outputs.tag }}"
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: "Cheat Engine ${{ steps.ver.outputs.tag }}"
           draft: false
           prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
           generate_release_notes: true
           files: |
-            CheatEngine-${{ steps.version.outputs.tag }}.zip
+            CheatEngine-${{ steps.ver.outputs.tag }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
