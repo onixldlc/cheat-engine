@@ -1,0 +1,63 @@
+name: 'Setup Lazarus'
+description: 'Download and install Lazarus 2.2.2 with FPC 3.2.2 (win64 + i386 cross-compiler)'
+
+inputs:
+  cache:
+    description: 'Whether to cache the Lazarus installers'
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Cache Lazarus installers
+      if: inputs.cache == 'true'
+      id: cache-lazarus
+      uses: actions/cache@v4
+      with:
+        path: C:\lazarus-cache
+        key: lazarus-2.2.2-fpc-3.2.2-win64-v1
+
+    - name: Download Lazarus 2.2.2 (win64)
+      if: steps.cache-lazarus.outputs.cache-hit != 'true'
+      shell: powershell
+      run: |
+        New-Item -ItemType Directory -Force -Path C:\lazarus-cache | Out-Null
+        $ProgressPreference = 'SilentlyContinue'
+        Write-Host "Downloading Lazarus 2.2.2 win64 installer..."
+        Invoke-WebRequest `
+          -Uri "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%202.2.2/lazarus-2.2.2-fpc-3.2.2-win64.exe/download" `
+          -OutFile "C:\lazarus-cache\lazarus-win64.exe" `
+          -MaximumRetryCount 5 `
+          -RetryIntervalSec 10
+        Write-Host "Downloading Lazarus 2.2.2 i386 cross-compiler..."
+        Invoke-WebRequest `
+          -Uri "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%202.2.2/lazarus-2.2.2-fpc-3.2.2-cross-i386-win32-win64.exe/download" `
+          -OutFile "C:\lazarus-cache\lazarus-cross-i386.exe" `
+          -MaximumRetryCount 5 `
+          -RetryIntervalSec 10
+
+    - name: Install Lazarus 2.2.2
+      shell: powershell
+      run: |
+        Write-Host "Installing Lazarus 2.2.2 (win64)..."
+        $proc = Start-Process -Wait -PassThru -FilePath "C:\lazarus-cache\lazarus-win64.exe" `
+          -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'
+        if ($proc.ExitCode -ne 0) {
+          Write-Error "Lazarus win64 install failed with exit code $($proc.ExitCode)"
+          exit 1
+        }
+        Write-Host "Installing Lazarus i386 cross-compiler..."
+        $proc2 = Start-Process -Wait -PassThru -FilePath "C:\lazarus-cache\lazarus-cross-i386.exe" `
+          -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'
+        if ($proc2.ExitCode -ne 0) {
+          Write-Warning "Cross-compiler install exited with code $($proc2.ExitCode) (may be non-fatal)"
+        }
+        Write-Host "Lazarus installed at C:\lazarus"
+        "C:\lazarus" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        "C:\lazarus\fpc\3.2.2\bin\x86_64-win64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    - name: Verify Lazarus installation
+      shell: cmd
+      run: |
+        C:\lazarus\lazbuild.exe --version
