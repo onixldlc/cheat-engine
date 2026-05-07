@@ -52,12 +52,19 @@ jobs:
 
       - name: Install FPC cross-compiler (i386-win32)
         shell: pwsh
+        continue-on-error: true
         run: |
-          Write-Host "Downloading i386-win32 cross-compiler..."
-          $ProgressPreference = 'SilentlyContinue'
-          Invoke-WebRequest `
-            -Uri "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%202.2.2/lazarus-2.2.2-fpc-3.2.2-cross-i386-win32-win64.exe/download" `
-            -OutFile "cross-i386.exe" -MaximumRetryCount 5 -RetryIntervalSec 10
+          Write-Host "Downloading i386-win32 cross-compiler via curl..."
+          # curl.exe follows SourceForge redirects correctly
+          curl.exe -L --retry 5 --retry-delay 10 -o cross-i386.exe `
+            "https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%202.2.2/lazarus-2.2.2-fpc-3.2.2-cross-i386-win32-win64.exe/download"
+          if ($LASTEXITCODE -ne 0) { Write-Warning "curl download failed (exit $LASTEXITCODE)"; exit 0 }
+          $size = (Get-Item cross-i386.exe).Length
+          Write-Host "Downloaded $size bytes"
+          if ($size -lt 1MB) {
+            Write-Warning "File too small ($size bytes) – likely an HTML redirect page, skipping install"
+            exit 0
+          }
           Write-Host "Installing cross-compiler..."
           Start-Process -Wait -FilePath ".\cross-i386.exe" `
             -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'
